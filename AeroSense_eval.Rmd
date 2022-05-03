@@ -1,0 +1,252 @@
+---
+title: "Aerosol Sense"
+output: html_notebook
+---
+
+```{r}
+library(aod)
+library(ggplot2)
+library(tidyverse)
+library(caret)
+```
+Data had been cleaned:
+  - MRN changed to Unit##
+  - Collection Time changed to include only Date
+  - Result only reflects Positive = 1, all other results of Neg, Inc, Inv = 0.
+```{r}
+aero <- read.csv("C:/Users/t.ganz/Desktop/AeroSense/Aero_02.csv")
+aero$Collection <- as.Date(aero$Collection, "%m/%d/%Y")
+aero$Unit <- factor(aero$Unit)
+head(aero)
+```
+-----Data Viz-----
+Pos Counts for All Units
+```{r}
+ggplot(aero,aes(Collection, Result))+
+  geom_col()+
+  ylim(0,6)+
+  scale_x_date(limits = as.Date(c("2021-05-01","2022-05-01")))+
+  ggtitle("All Units")+
+  theme_bw()+
+  theme(plot.title = element_text(size=16))
+```
+Pos Counts per Unit
+```{r}
+for (i in c(1:10)){
+  a <- subset(aero, Unit == i)
+  b <- ggplot(a, aes(Collection, Result))+
+    geom_col()+
+    ylim(0,3)+
+    scale_x_date(limits = as.Date(c("2021-05-01","2022-05-01")))+
+    ggtitle("Unit",i)+
+    theme_bw()+
+    theme(plot.title = element_text(size=16))
+  print(b)
+}
+```
+
+
+```{r}
+summary(aero)
+```
+
+```{r}
+xtabs(~Result + Unit, data=aero)
+```
+Logistic Regression ---
+- the models only unit (Collection Time has been left out)
+```{r}
+aero_logit <- glm(Result~Unit, data=aero, family = "binomial")
+```
+
+```{r}
+summary(aero_logit)
+```
+Analysis---
+
+- formula:  p = exp(-1.9459 + 0.2283*Unit2 - 1.2993*Unit3 - 0.3802*Unit4 + 0.1804*Unit5 - 
+11.6202*Unit6 - 1.7430*Unit7 + 1.6205*Unit8 + 2.100*Unit9 + 0.7673*Unit10) / [1 + exp(-1.9459 + 0.2283*Unit2 - 1.2993*Unit3 - 0.3802*Unit4 + 0.1804*Unit5 - 11.6202*Unit6 - 1.7430*Unit7 + 1.6205*Unit8 + 2.100*Unit9 + 0.7673*Unit10)].
+
+- Only Unit 9 shows significant coefficient
+- Units 2, 5, 8, 9, and 10 have positive coefficients
+- Units 3, 4, 6, and 7 have negative coefficients
+- Unit 6 with one result is suspect
+- Review Confidence Intervals using SE
+```{r}
+confint.default(aero_logit)
+```
+```{r}
+newdata <- factor(sample(c(1:10), 819, replace = TRUE))
+length(newdata)
+probs <- predict(aero_logit, newdata=data.frame(Unit=newdata))
+head(probs)
+pred.class <- ifelse(probs > 0.5, "pos", "neg")
+plot(newdata,pred.class)
+```
+```{r}
+head(aero)
+```
+
+Wald's Test ---
+```{r}
+wald.test(b = coef(aero_logit), Sigma = vcov(aero_logit), Terms = 2:10)
+```
+Analysis---
+- Wald's test/Chi square indicates unit is significant.
+- 
+
+```{r}
+l <- cbind(0,0,0,0,0,0,0,0,1,0,-1)
+wald.test(b = coef(aero_logit), Sigma = vcov(aero_logit), L = l)
+```
+---
+NEW DATASETS
+Aero_04 - 330 observations with additional features:
+  - Location of Unit, Collection Start datetime, Collection End datetime
+  - *note - missing times assumed 12 hours difference (n<20)
+Aero_05 - 818 observations of original Aero_02 data with:
+  - Location of Unit - assumed by mode of location assigned to unit from metadata
+  - Metadata for units 8 and 9 included cleaned/dirty status not reflected in dataframe
+  - Unit 6 removed - 
+---
+```{r}
+aero4 <- read.csv("C:/Users/t.ganz/Desktop/AeroSense/Aero_04.csv")
+aero4$Collection <- as.Date(aero4$Collection, "%m/%d/%Y")
+aero4$Unit <- factor(aero4$Unit)
+aero4$coll_st <- as.POSIXct(aero4$coll_st,format="%m/%d/%Y %H:%M")
+aero4$coll_end <- as.POSIXct(aero4$coll_end,format="%m/%d/%Y %H:%M")
+View(aero4)
+```
+Add column with length of collection time by finding difference between 
+coll_end and coll_st - perform stats analysis.
+```{r}
+aero4$coll_span <- aero4$coll_end - aero4$coll_st
+```
+coll_span column contains length of collection time in minutes
+```{r}
+aero4$coll_span <- as.numeric(aero4$coll_span)
+summary(aero4$coll_span)
+```
+```{r}
+ggplot(aero4, aes(coll_span))+
+  geom_histogram(binwidth = 20)+
+  theme_bw()
+```
+remove outliers with spans > 2000 minutes
+```{r}
+which(aero4$coll_span >2000)
+```
+```{r}
+aero4_1 <- aero4[-c(42, 43, 98, 99),]
+summary(aero4_1$coll_span)
+```
+
+```{r}
+ggplot(aero4_1, aes(coll_span))+
+  geom_histogram(binwidth = 10)+
+  theme_bw()
+```
+Histogram of collection times per Unit...
+```{r}
+for (i in c(1:5,7:10)){
+  a <- subset(aero4_1, Unit == i)
+  b <- ggplot(a, aes(coll_span))+
+    geom_histogram(binwidth = 10)+
+    ggtitle("Unit",i)+
+    theme_bw()
+  print(b)
+}
+```
+Summary stats for collection times for all units:
+```{r}
+for (i in c(1:5,7:10)){
+  a <- subset(aero4_1, Unit == i)
+  b <- summary(a$coll_span)
+  print(b)
+}
+```
+```{r}
+xtabs(~Result + Unit, data=aero4_1)
+```
+```{r}
+unique(aero4_1$Location)
+```
+
+ Regression per Unit
+```{r}
+for (i in c(1:5,7:10)){
+  a <- subset(aero4_1, Unit == i)
+  b <- glm(Result~coll_span, data=a, family = binomial)
+  print(summary(b))
+}
+```
+
+```{r}
+for (i in c(1:5,7:10)){
+  a <- subset(aero4_1, Unit == i)
+  b <- plot(Result~coll_span, data=a)
+  b
+}
+```
+```{r}
+plot(coll_span~Unit, data=aero4_1)
+```
+Both the regressions and the scatter plots indicate no relationship
+
+Log Transformation?
+```{r}
+aero4_1$log_span <- log(aero4_1$coll_span)
+```
+```{r}
+for (i in c(1:5,7:10)){
+  a <- subset(aero4_1, Unit == i)
+  b <- plot(Result~log_span, data=a)
+  b
+}
+```
+Box-Cox Transformation?
+```{r}
+aero4_1$box_span <- boxcox(aero4_1$coll_span)
+```
+
+
+```{r}
+```
+
+
+
+
+
+```{r}
+aa <- subset(aero4_1, Unit == 5)
+aa
+new_span <- data.frame(coll_span = c(1:max(aa$coll_span)))
+new_span
+model <- glm(Result~coll_span, data=aa, family = binomial)
+summary(model)
+probs_4 <- model %>% predict(new_span, type = "response")
+probs_4
+pred_4.class <- ifelse(probs_4 > 0.5, "pos", "neg")
+pred_4.class
+
+aa %>%
+  mutate(prob = ifelse(pred_4.class == "pos", 1, 0)) %>%
+  ggplot(aes(coll_span, prob)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+  labs(
+    title = "Logistic Regression Model", 
+    x = "collection span",
+    y = "Probability of detecting pos"
+    )
+```
+
+
+```{r}
+data.frame(c(20,180))
+```
+
+
+```{r}
+```
+
